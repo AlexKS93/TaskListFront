@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+node_modules
+task-list-front/node_modules
+node_modules/*
+task-list-front/node_modules/*
