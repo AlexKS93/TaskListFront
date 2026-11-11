@@ -31,6 +31,7 @@ export const authApi = {
       // Сохраняем токен и имя пользователя в браузер
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('username', data.username);
+      localStorage.setItem('sys_username', data.sys_username); // 👈 Сохраняем системный логин
 
       return data;
     } catch (error) {
@@ -45,6 +46,7 @@ export const authApi = {
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
+    localStorage.removeItem('sys_username'); // Очищаем при выходе
   },
 
   /**
@@ -59,5 +61,8 @@ export const authApi = {
    */
   getCurrentUser: () => {
     return localStorage.getItem('username') || '';
-  }
+  },
+  getSysUser: () => {
+  return localStorage.getItem('sys_username') || '';
+  },
 };

@@ -96,5 +96,14 @@ export const taskApi = {
       throw new Error(err.detail || 'Не удалось удалить объект'); //
     }
     return res.json();
+  },
+
+  async getAnalytics(period = 'month') {
+    const res = await fetch(`${API_BASE}/tasks/analytics/?period=${period}`, {
+      method: 'GET',
+      headers: getHeaders()
+    });
+    if (!res.ok) throw new Error('Ошибка при загрузке аналитики');
+    return res.json();
   }
 };
