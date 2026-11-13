@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from 'react';
 
-// 👑 Список корпоративных логинов начальников (синхронизировать с бэкендом BOSS_LOGINS)
-const BOSS_LOGINS = ["aleksandr.skabelkin", "admin", "chief_asutp"];
-
 export default function TaskCalendar({ 
-  tasks, onStatusChange, onDateChange, currentUser, sysUser, 
-  onMonthChange, onAddClick, onEditClick, onDeleteClick 
+  tasks, onStatusChange, onDateChange, currentUser, sysUser, isBoss,
+  onMonthChange, onAddClick, onEditClick, onDeleteClick, onCopyTask
 }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDayDetails, setSelectedDayDetails] = useState(null);
+  const [dropConfirm, setDropConfirm] = useState(null); // { task, targetDate }
   
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  const isBoss = BOSS_LOGINS.includes(sysUser?.toLowerCase());
-  const checkAccess = (task) => isBoss || !task.who || task.who.toLowerCase() === sysUser?.toLowerCase();
-
+  const checkAccess = (task) => {
+    if (isBoss) return true;
+    if (!task.who) return true;
+    
+    const taskOwner = task.who.trim().toLowerCase();
+    const login = (sysUser || '').trim().toLowerCase();
+    const fullName = (currentUser || '').trim().toLowerCase();
+    
+    // Разрешаем доступ, если автор совпадает с логином ИЛИ с полным ФИО
+    return taskOwner === login || taskOwner === fullName;
+  };
   useEffect(() => {
     const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
     onMonthChange(monthStr);
@@ -38,18 +44,20 @@ export default function TaskCalendar({
   }, {});
 
   const handleDragStart = (e, task) => {
-    if (!checkAccess(task)) {
-      e.preventDefault();
-      alert(`Запрещено: Перемещать задачи может только исполнитель (${task.who}) или начальник.`);
-      return;
-    }
+    // Разрешаем начать перетаскивание всем (для копирования), но запоминаем задачу
     e.dataTransfer.setData('text/plain', task.id);
   };
 
   const handleDrop = (e, targetDate) => {
     e.preventDefault();
     const taskId = parseInt(e.dataTransfer.getData('text/plain'), 10);
-    if (taskId) onDateChange(taskId, targetDate);
+    const draggedTask = tasks.find(t => t.id === taskId);
+    
+    // Если задачу бросили на тот же самый день — ничего не делаем
+    if (!draggedTask || draggedTask.date === targetDate) return;
+
+    // Открываем окно выбора действия
+    setDropConfirm({ task: draggedTask, targetDate });
   };
 
   const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -61,7 +69,7 @@ export default function TaskCalendar({
       <div className="mb-6 flex flex-col sm:flex-row justify-between items-center gap-4 border-b border-gray-100 pb-4">
         <div>
           <h2 className="text-xl font-bold text-gray-900">📅 {monthNames[month]} {year}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Кликните на день для управления. {isBoss && <span className="text-blue-600 font-bold">👑 Режим Начальника</span>}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Кликните на день для управления. </p>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 text-sm transition">◀</button>
@@ -96,7 +104,7 @@ export default function TaskCalendar({
                 {dayTasks.map((task) => (
                   <div
                     key={task.id}
-                    draggable={checkAccess(task)}
+                    draggable={true}
                     onDragStart={(e) => { e.stopPropagation(); handleDragStart(e, task); }}
                     onClick={(e) => e.stopPropagation()}
                     className={`bg-white border rounded-lg p-2 shadow-xs text-left text-ellipsis overflow-hidden ${checkAccess(task) ? 'cursor-grab border-gray-200 hover:border-blue-400' : 'opacity-75 cursor-not-allowed bg-gray-50/50'}`}
@@ -166,6 +174,70 @@ export default function TaskCalendar({
           </div>
         </div>
       )}
+      {/* ==================== Модальное окно выбора: Перенести или Скопировать ==================== */}
+      {dropConfirm && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50"
+          onClick={() => setDropConfirm(null)}
+        >
+          <div 
+            className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Действие с задачей</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Вы перетащили задачу «<span className="font-semibold text-gray-700">{dropConfirm.task.what_said || dropConfirm.task.object_name}</span>» на{' '}
+                <span className="font-bold text-blue-600">
+                  {new Date(dropConfirm.targetDate).toLocaleDateString('ru-RU')}
+                </span>.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {/* Кнопка Перенести (доступна только если есть права на редактирование этой задачи) */}
+              <button
+                type="button"
+                disabled={!checkAccess(dropConfirm.task)}
+                onClick={() => {
+                  onDateChange(dropConfirm.task.id, dropConfirm.targetDate);
+                  setDropConfirm(null);
+                }}
+                title={!checkAccess(dropConfirm.task) ? 'Переносить чужую задачу может только начальник' : ''}
+                className={`w-full py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition ${
+                  checkAccess(dropConfirm.task)
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <span>➡️</span> Перенести на эту дату
+              </button>
+
+              {/* Кнопка Скопировать (доступна всем) */}
+              <button
+                type="button"
+                onClick={() => {
+                  onCopyTask(dropConfirm.task.id, dropConfirm.targetDate);
+                  setDropConfirm(null);
+                }}
+                className="w-full py-2.5 px-4 rounded-lg text-sm font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <span>📋</span> Создать копию на эту дату
+              </button>
+
+              {/* Кнопка Отмена */}
+              <button
+                type="button"
+                onClick={() => setDropConfirm(null)}
+                className="w-full py-2 px-4 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 transition mt-1"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+  
 }

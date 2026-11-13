@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:8000'; // Укажите URL вашего FastAPI бэкенда
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export const authApi = {
   /**
@@ -28,10 +28,10 @@ export const authApi = {
 
       const data = await response.json();
       
-      // Сохраняем токен и имя пользователя в браузер
       localStorage.setItem('token', data.access_token);
       localStorage.setItem('username', data.username);
-      localStorage.setItem('sys_username', data.sys_username); // 👈 Сохраняем системный логин
+      localStorage.setItem('sys_username', data.sys_username);
+      localStorage.setItem('is_boss', data.is_boss ? 'true' : 'false');
 
       return data;
     } catch (error) {
@@ -46,7 +46,8 @@ export const authApi = {
   logout: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    localStorage.removeItem('sys_username'); // Очищаем при выходе
+    localStorage.removeItem('sys_username');
+    localStorage.removeItem('is_boss');
   },
 
   /**
@@ -64,5 +65,8 @@ export const authApi = {
   },
   getSysUser: () => {
   return localStorage.getItem('sys_username') || '';
+  },
+  getIsBoss: () => {
+    return localStorage.getItem('is_boss') === 'true';
   },
 };

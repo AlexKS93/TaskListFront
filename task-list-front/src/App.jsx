@@ -8,6 +8,7 @@ import ObjectModal from './components/ObjectModal';
 import Login from './components/Login'; 
 import TaskCalendar from './components/TaskCalendar';
 import TaskStats from './components/TaskStats'; 
+import * as XLSX from 'xlsx';
 
 const INITIAL_FORM = {
   date: new Date().toISOString().split('T')[0],
@@ -16,6 +17,7 @@ const INITIAL_FORM = {
 };
 
 export default function App() {
+  const [usersList, setUsersList] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(authApi.isAuthenticated());
   const [sysUser, setSysUser] = useState(authApi.getSysUser());
   const [currentUser, setCurrentUser] = useState(authApi.getCurrentUser());
@@ -40,6 +42,7 @@ export default function App() {
 
   const [viewMode, setViewMode] = useState('table'); 
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [isBoss, setIsBoss] = useState(authApi.getIsBoss());
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -75,6 +78,18 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  const loadUsers = useCallback(async () => {
+      if (!isAuthenticated) return;
+      try {
+        const data = await taskApi.getUsers();
+        setUsersList(data || []);
+      } catch (err) {
+        console.error('Ошибка загрузки сотрудников:', err);
+      }
+    }, [isAuthenticated]);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
   useEffect(() => { loadTasks(); }, [loadTasks]);
   useEffect(() => { loadObjects(); }, [loadObjects]);
   useEffect(() => { setOffset(0); }, [statusFilter, objectFilter, dateFilter]);
@@ -88,6 +103,7 @@ export default function App() {
     setIsAuthenticated(true);
     setCurrentUser(authApi.getCurrentUser());
     setSysUser(authApi.getSysUser());
+    setIsBoss(authApi.getIsBoss());
   };
 
   const handleLogout = () => {
@@ -97,6 +113,8 @@ export default function App() {
     setSysUser('');
     setTasks([]);
     setObjects([]);
+    setIsBoss(false);
+    setUsersList([]);
   };
 
   const resetTaskForm = (availableObjects) => {
@@ -137,6 +155,7 @@ export default function App() {
       setEditingTask(null);
       resetTaskForm(objects);
       loadTasks();
+      loadUsers();
     } catch (err) {
       alert(err.message);
     }
@@ -194,6 +213,78 @@ export default function App() {
     } catch (err) { alert(err.message); }
   };
 
+   const handleCopyTask = async (taskId, newDate) => {
+    const sourceTask = tasks.find(t => t.id === taskId);
+    if (!sourceTask) return;
+
+    try {
+      // Создаем копию без id, чтобы бэкенд создал новую запись
+      const { id, object_name, ...taskData } = sourceTask;
+      await taskApi.saveTask({ 
+        ...taskData, 
+        date: newDate,
+        status: 'Запланировано' // Для копии логично ставить статус "Запланировано"
+      });
+      loadTasks();
+    } catch (err) {
+      alert('Не удалось скопировать задачу: ' + err.message);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      // Запрашиваем все задачи с учетом текущих фильтров
+      const allFilteredTasks = await taskApi.exportTasks({
+        search: debouncedSearch,
+        statusFilter,
+        objectFilter,
+        dateFilter,
+        monthFilter: viewMode === 'calendar' ? selectedMonth : ''
+      });
+
+      if (allFilteredTasks.length === 0) {
+        alert('Нет данных для выгрузки по выбранным фильтрам.');
+        return;
+      }
+
+      // Формируем строки для таблицы Excel (названия колонок совпадают с нашим скриптом импорта)
+      const excelRows = allFilteredTasks.map(task => ({
+        'Дата': new Date(task.date).toLocaleDateString('ru-RU'),
+        'Объект': task.object_name || '',
+        'Что сказали': task.what_said || '',
+        'Что было': task.what_was || '',
+        'Что сделано': task.what_done || '',
+        'Статус': task.status || '',
+        'Исполнитель': task.who || '',
+        'Примечание': task.note || ''
+      }));
+
+      // Создаем лист и книгу Excel
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      
+      // Настраиваем комфортную ширину столбцов
+      worksheet['!cols'] = [
+        { wch: 12 }, // Дата
+        { wch: 25 }, // Объект
+        { wch: 35 }, // Что сказали
+        { wch: 30 }, // Что было
+        { wch: 35 }, // Что сделано
+        { wch: 15 }, // Статус
+        { wch: 25 }, // Исполнитель
+        { wch: 25 }  // Примечание
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Журнал АСУТП');
+
+      // Генерируем имя файла с текущей датой
+      const today = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(workbook, `Журнал_АСУТП_${today}.xlsx`);
+    } catch (err) {
+      alert('Ошибка выгрузки в Excel: ' + err.message);
+    }
+  };
+
   if (!isAuthenticated) return <Login onAuthSuccess={handleAuthSuccess} />;
 
   return (
@@ -214,7 +305,23 @@ export default function App() {
           </div>
 
           {viewMode !== 'stats' && (
-            <button type="button" onClick={handlePlusClick} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition text-sm"><span>➕</span> Добавить запись</button>
+            <>
+              <button 
+                type="button" 
+                onClick={handlePlusClick} 
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition text-sm"
+              >
+                <span>➕</span> Добавить запись
+              </button>
+              <button 
+                type="button" 
+                onClick={handleExportExcel} 
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow-sm transition text-sm"
+                title="Выгрузить текущий список задач в Excel"
+              >
+                <span>📥</span> В Excel
+              </button>
+            </>
           )}
           <button type="button" onClick={() => setIsObjModalOpen(true)} className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium transition text-sm"><span>⚙️</span> Объекты</button>
           <button type="button" onClick={handleLogout} className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg font-medium transition text-sm border border-red-100"><span>🚪</span> Выйти</button>
@@ -225,11 +332,35 @@ export default function App() {
         <FilterBar search={searchTerm} setSearch={setSearchTerm} objectFilter={objectFilter} setObjectFilter={setObjectFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} objects={objects} setDateFilter={setDateFilter} dateFilter={dateFilter} />
       )}
       
-      {viewMode === 'table' && <TaskTable tasks={tasks} total={total} limit={limit} offset={offset} setOffset={setOffset} onEdit={handleEditClick} onDelete={handleDeleteTask} />}
-      {viewMode === 'calendar' && <TaskCalendar tasks={tasks} currentUser={currentUser} sysUser={sysUser} onStatusChange={handleStatusChange} onDateChange={handleDateChange} onMonthChange={handleMonthChange} onAddClick={handleCalendarAddClick} onEditClick={handleEditClick} onDeleteClick={handleDeleteTask} />}
+      {viewMode === 'table' && <TaskTable tasks={tasks} 
+          total={total} 
+          limit={limit} 
+          offset={offset} 
+          setOffset={setOffset} 
+          onEdit={handleEditClick} 
+          onDelete={handleDeleteTask}
+          currentUser={currentUser}
+          sysUser={sysUser}
+          isBoss={isBoss} />}
+      {viewMode === 'calendar' && <TaskCalendar tasks={tasks} currentUser={currentUser} sysUser={sysUser} isBoss={isBoss}
+                                    onStatusChange={handleStatusChange} onDateChange={handleDateChange} 
+                                    onMonthChange={handleMonthChange} onAddClick={handleCalendarAddClick}
+                                    onEditClick={handleEditClick} onDeleteClick={handleDeleteTask} 
+                                    onCopyTask={handleCopyTask}
+                                    />
+      }
       {viewMode === 'stats' && <TaskStats />}
 
-      <TaskModal isOpen={isTaskModalOpen} onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }} onSubmit={handleTaskSubmit} taskForm={taskForm} setTaskForm={setTaskForm} objects={objects} isEditing={!!editingTask} />
+      <TaskModal 
+        isOpen={isTaskModalOpen} 
+        onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }} 
+        onSubmit={handleTaskSubmit} 
+        taskForm={taskForm} 
+        setTaskForm={setTaskForm} 
+        objects={objects} 
+        usersList={usersList}
+        isEditing={!!editingTask}
+        isBoss={isBoss} />
       <ObjectModal isOpen={isObjModalOpen} onClose={() => setIsObjModalOpen(false)} objects={objects} newObjName={newObjName} setNewObjName={setNewObjName} onCreate={handleCreateObject} onDelete={handleDeleteObject} />
     </div>
   );
